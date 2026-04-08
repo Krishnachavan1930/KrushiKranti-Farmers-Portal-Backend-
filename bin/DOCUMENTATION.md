@@ -20,8 +20,7 @@ KrushiKranti is an agricultural marketplace platform connecting farmers directly
 | **SpringDoc OpenAPI** | 2.7.0 | API Documentation (Swagger) |
 | **Cloudinary** | 1.36.0 | Image Upload & Storage |
 | **Razorpay** | 1.4.6 | Payment Gateway |
-| **JavaMailSender** | - | Email OTP (local/SMTP) |
-| **Brevo HTTP API** | v3 | Email OTP (production) |
+| **JavaMailSender** | - | Email OTP Verification |
 
 ---
 
@@ -105,38 +104,6 @@ backend/
             ├── application.properties           # MySQL config (ONLY database)
             └── schema.sql                       # Optional schema reference
 ```
-
----
-
-## 🏗️ System Architecture
-
-```
-┌────────────────────┐      HTTPS       ┌─────────────────────┐
-│  Frontend (Vite)   │ ◄──────────────► │  Backend (Spring)    │
-│  Vercel / local    │                  │  Railway / local     │
-└────────────────────┘                  └────────┬────────────┘
-                                                 │
-              ┌──────────────────────────────────┼──────────────────────┐
-              │                                  │                      │
-    ┌─────────▼──────────┐   ┌─────────────────▼───────────┐   ┌─────────────▼──────┐
-    │  MySQL Database    │   │  Email Provider              │   │  External APIs     │
-    │  (Railway / local) │   │  SMTP (local)                │   │  - Cloudinary      │
-    │                    │   │  Brevo HTTP API (prod)       │   │  - Razorpay        │
-    └────────────────────┘   └─────────────────────────────┘   │  - Shiprocket      │
-                                                                │  - Google OAuth2   │
-                                                                └────────────────────┘
-```
-
-### Email Provider Selection
-
-The `EmailService` supports two providers, selected via environment variable:
-
-| `EMAIL_PROVIDER` | How it sends | When to use |
-|------------------|--------------|-------------|
-| `smtp` (default) | JavaMailSender via SMTP port 587 | Local dev (Gmail app password) |
-| `brevo`          | Brevo HTTP API (`POST /v3/smtp/email`) | Production on Railway (SMTP ports blocked) |
-
-The provider is set in your environment. All public method signatures remain identical regardless of which provider is active.
 
 ---
 
@@ -281,37 +248,22 @@ spring.jpa.hibernate.ddl-auto=update
 
 ---
 
-## 📧 Email Configuration
-
-### Option A: SMTP / Gmail (Local Development)
+## 📧 Email Configuration (Gmail)
 
 1. Enable 2-Step Verification in Google Account
 2. Generate App Password:
    - Go to Google Account → Security → App passwords
    - Select "Mail" and generate
-3. Set in `.env`:
-   ```
-   EMAIL_PROVIDER=smtp
-   MAIL_HOST=smtp.gmail.com
-   MAIL_PORT=587
-   MAIL_USERNAME=your-email@gmail.com
-   MAIL_PASSWORD=your-16-char-app-password
-   ```
 
-### Option B: Brevo HTTP API (Production / Railway)
-
-Railway blocks SMTP ports (587/465). Use Brevo's HTTP API instead.
-
-1. Create a free account at https://www.brevo.com (300 emails/day)
-2. Go to SMTP & API → API Keys → Generate a new API key
-3. Verify your sender email in Brevo (Senders & IPs → Add sender)
-4. Set in Railway environment variables:
-   ```
-   EMAIL_PROVIDER=brevo
-   BREVO_API_KEY=xkeysib-xxxxxxxxxxxx
-   BREVO_SENDER_EMAIL=noreply@yourdomain.com
-   BREVO_SENDER_NAME=KrushiKranti
-   ```
+**Configuration:**
+```properties
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=your-email@gmail.com
+spring.mail.password=your-16-char-app-password
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
+```
 
 ---
 
@@ -367,33 +319,17 @@ cloudinary.api-secret=your-api-secret
 
 ## 🔧 Environment Variables
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `SPRING_PROFILES_ACTIVE` | Active profile | `dev` | ✅ prod |
-| `PORT` | Server port | `8080` | ❌ |
-| `DB_URL` | MySQL JDBC URL | localhost | ✅ |
-| `DB_USERNAME` | Database user | `root` | ✅ |
-| `DB_PASSWORD` | Database password | (blank) | ✅ |
-| `JWT_SECRET` | JWT signing key (256-bit) | dev fallback | ✅ prod |
-| `JWT_EXPIRATION_MS` | Access token TTL (ms) | `86400000` | ❌ |
-| `JWT_REFRESH_EXPIRATION_MS` | Refresh token TTL (ms) | `604800000` | ❌ |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated frontend URLs | `http://localhost:5173` | ✅ prod |
-| `EMAIL_PROVIDER` | `smtp` or `brevo` | `smtp` | ✅ prod |
-| `BREVO_API_KEY` | Brevo API key | (blank) | ✅ if brevo |
-| `BREVO_SENDER_EMAIL` | Brevo sender email | (blank) | ✅ if brevo |
-| `BREVO_SENDER_NAME` | Brevo sender name | `KrushiKranti` | ❌ |
-| `MAIL_HOST` | SMTP host | `smtp.gmail.com` | ✅ if smtp |
-| `MAIL_PORT` | SMTP port | `587` | ❌ |
-| `MAIL_USERNAME` | SMTP email address | (blank) | ✅ if smtp |
-| `MAIL_PASSWORD` | SMTP app password | (blank) | ✅ if smtp |
-| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud name | (blank) | ✅ |
-| `CLOUDINARY_API_KEY` | Cloudinary API key | (blank) | ✅ |
-| `CLOUDINARY_API_SECRET` | Cloudinary API secret | (blank) | ✅ |
-| `RAZORPAY_KEY_ID` | Razorpay key ID | (blank) | ✅ |
-| `RAZORPAY_KEY_SECRET` | Razorpay key secret | (blank) | ✅ |
-| `GOOGLE_CLIENT_ID` | Google OAuth2 client ID | (blank) | ✅ |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth2 client secret | (blank) | ✅ |
-| `OAUTH2_FRONTEND_SUCCESS_URL` | OAuth2 redirect URL | `http://localhost:5173` | ✅ prod |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MAIL_HOST` | SMTP host | smtp.gmail.com |
+| `MAIL_PORT` | SMTP port | 587 |
+| `MAIL_USERNAME` | Email address | - |
+| `MAIL_PASSWORD` | App password | - |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud | - |
+| `CLOUDINARY_API_KEY` | Cloudinary key | - |
+| `CLOUDINARY_API_SECRET` | Cloudinary secret | - |
+| `RAZORPAY_KEY_ID` | Razorpay key | - |
+| `RAZORPAY_KEY_SECRET` | Razorpay secret | - |
 
 ---
 
@@ -417,58 +353,13 @@ Get-NetTCPConnection -LocalPort 8080 | ForEach-Object { Stop-Process -Id $_.Owni
 
 ### Database Connection Failed
 1. Ensure MySQL is running
-2. Verify credentials in `.env`
-3. Check if database exists: `CREATE DATABASE IF NOT EXISTS krushikranti_db;`
+2. Verify credentials in `application.properties`
+3. Check if database exists
 
-### Email Not Sending (Local)
+### Email Not Sending
 1. Use Gmail App Password (not regular password)
-2. Check `MAIL_USERNAME` and `MAIL_PASSWORD` in `.env`
+2. Check `spring.mail.username` and `spring.mail.password`
 3. Test with: `GET /api/v1/auth/test-email?email=test@example.com`
-
-### Email Not Sending (Production / Railway)
-1. Ensure `EMAIL_PROVIDER=brevo` is set in Railway env vars
-2. Verify `BREVO_API_KEY` is valid
-3. Verify sender email is verified in Brevo dashboard
-4. Check Railway logs for `[OTP] Email sending failed` messages
-
-### CORS Errors
-1. Ensure `CORS_ALLOWED_ORIGINS` includes your frontend URL
-2. Include protocol: `https://your-app.vercel.app` (not just `your-app.vercel.app`)
-3. Check startup logs for `CORS allowed origins:` line
-
----
-
-## 🚀 Deployment Guide
-
-### Railway (Backend)
-
-1. Push code to GitHub
-2. Create a new Railway project → Deploy from GitHub repo
-3. Set root directory to `krushikranti-backend`
-4. Add a MySQL plugin in Railway
-5. Set all environment variables from `.env.production` template
-6. Key variables:
-   - `SPRING_PROFILES_ACTIVE=prod`
-   - `EMAIL_PROVIDER=brevo`
-   - `CORS_ALLOWED_ORIGINS=https://your-frontend.vercel.app`
-   - `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` (from Railway MySQL plugin)
-7. Railway auto-detects Maven and builds with `mvn clean package`
-
-### Vercel (Frontend)
-
-1. Push frontend code to GitHub
-2. Import project in Vercel
-3. Set framework to Vite
-4. Set environment variable: `VITE_API_BASE_URL=https://your-backend.railway.app`
-5. Deploy
-
-### Post-Deployment Verification
-
-1. ✅ Backend health: `curl https://your-backend.railway.app/api/v1/auth/test-email?email=test@test.com`
-2. ✅ CORS: Frontend can call backend without errors
-3. ✅ OTP: Register a test user and receive OTP email
-4. ✅ Login: Verify JWT tokens work
-5. ✅ Payments: Test Razorpay integration
 
 ---
 
@@ -481,4 +372,4 @@ http://localhost:8080/swagger-ui.html
 
 ---
 
-*Last Updated: April 2026*
+*Last Updated: March 2026*

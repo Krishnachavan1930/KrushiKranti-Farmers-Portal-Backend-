@@ -27,7 +27,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final JwtService jwtService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    @Value("${app.oauth2.frontend-success-url:http://localhost:5173/}")
+    @Value("${app.oauth2.frontend-success-url:http://localhost:5173}")
     private String frontendSuccessUrl;
 
     @Override

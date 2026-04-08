@@ -9,9 +9,11 @@ import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Configuration
@@ -19,8 +21,22 @@ public class SwaggerConfig {
 
     private static final String SECURITY_SCHEME_NAME = "bearerAuth";
 
+    @Value("${server.port:8080}")
+    private String serverPort;
+
+    @Value("${app.swagger.production-url:}")
+    private String productionUrl;
+
     @Bean
     public OpenAPI krushiKrantiOpenAPI() {
+        List<Server> servers = new ArrayList<>();
+        servers.add(new Server().url("http://localhost:" + serverPort).description("Local Development Server"));
+
+        // Only add production server if URL is configured
+        if (productionUrl != null && !productionUrl.isBlank()) {
+            servers.add(new Server().url(productionUrl).description("Production Server"));
+        }
+
         return new OpenAPI()
                 .info(new Info()
                         .title("KrushiKranti API")
@@ -66,9 +82,7 @@ public class SwaggerConfig {
                 .externalDocs(new ExternalDocumentation()
                         .description("KrushiKranti Documentation")
                         .url("https://docs.krushikranti.com"))
-                .servers(List.of(
-                        new Server().url("http://localhost:8080").description("Local Development Server"),
-                        new Server().url("https://api.krushikranti.com").description("Production Server")))
+                .servers(servers)
                 .addSecurityItem(new SecurityRequirement().addList(SECURITY_SCHEME_NAME))
                 .components(new Components()
                         .addSecuritySchemes(SECURITY_SCHEME_NAME,
