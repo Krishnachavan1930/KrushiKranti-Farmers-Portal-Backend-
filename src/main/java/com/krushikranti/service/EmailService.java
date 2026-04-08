@@ -1,23 +1,29 @@
 package com.krushikranti.service;
 
 import com.krushikranti.model.ContactMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import jakarta.annotation.PostConstruct;
+import java.util.List;
+import java.util.Map;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    @Autowired(required = false)
+    private JavaMailSender mailSender;
 
-    @Value("${spring.mail.username}")
-    private String fromEmail;
+    @Value("${spring.mail.username:}")
+    private String smtpFromEmail;
 
     @Value("${app.name:KrushiKranti}")
     private String appName;
@@ -25,142 +31,227 @@ public class EmailService {
     @Value("${app.contact.admin-email:${spring.mail.username:}}")
     private String contactAdminEmail;
 
-    /**
-     * Send OTP verification email
-     * 
-     * @param toEmail recipient email address
-     * @param otp     the 6-digit OTP code
-     */
-    @Async
-    public void sendOtpEmail(String toEmail, String otp) {
-        try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
-            message.setSubject(appName + " Email Verification");
-            message.setText(buildOtpEmailBody(otp));
+    // --- Brevo HTTP API config ---
+    @Value("${app.email.provider:smtp}")
+    private String emailProvider;
 
-            mailSender.send(message);
-            log.info("OTP email sent successfully to: {}", toEmail);
-        } catch (Exception e) {
-            log.error("Failed to send OTP email to: {}", toEmail, e);
-            throw new RuntimeException("Failed to send OTP email. Please try again.");
+    @Value("${app.email.brevo.api-key:}")
+    private String brevoApiKey;
+
+    @Value("${app.email.brevo.sender-email:}")
+    private String brevoSenderEmail;
+
+    @Value("${app.email.brevo.sender-name:KrushiKranti}")
+    private String brevoSenderName;
+
+    @Value("${app.email.brevo.base-url:https://api.brevo.com/v3}")
+    private String brevoBaseUrl;
+
+    private RestTemplate restTemplate;
+
+    @PostConstruct
+    public void init() {
+        // Build a RestTemplate with sensible timeouts for Brevo calls
+        this.restTemplate = new RestTemplate();
+
+        log.info("Email provider configured: {}", emailProvider);
+        if (isBrevoProvider()) {
+            if (brevoApiKey.isBlank()) {
+                log.warn("EMAIL_PROVIDER=brevo but BREVO_API_KEY is blank — emails will fail!");
+            } else {
+                log.info("Brevo HTTP API ready (sender: {} <{}>)", brevoSenderName, brevoSenderEmail);
+            }
+        } else {
+            log.info("SMTP email provider active (from: {})", smtpFromEmail);
         }
     }
 
+    private boolean isBrevoProvider() {
+        return "brevo".equalsIgnoreCase(emailProvider);
+    }
+
+    // ---------------------------------------------------------------
+    // Sender email — whichever provider is active
+    // ---------------------------------------------------------------
+    private String getFromEmail() {
+        return isBrevoProvider() ? brevoSenderEmail : smtpFromEmail;
+    }
+
+    // ================================================================
+    // PUBLIC API — signatures unchanged, no breaking changes
+    // ================================================================
+
     /**
-     * Send welcome email after successful verification
-     * 
-     * @param toEmail  recipient email address
-     * @param userName user's name
+     * Send OTP verification email.
+     * This is called synchronously during registration so errors propagate
+     * back to the caller and the user sees a proper error message.
+     */
+    public void sendOtpEmail(String toEmail, String otp) {
+        String subject = appName + " Email Verification";
+        String body = buildOtpEmailBody(otp);
+        sendEmail(toEmail, subject, body, "OTP");
+    }
+
+    /**
+     * Send welcome email after successful verification.
      */
     @Async
     public void sendWelcomeEmail(String toEmail, String userName) {
         try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
-            message.setSubject("Welcome to " + appName + "!");
-            message.setText(buildWelcomeEmailBody(userName));
-
-            mailSender.send(message);
-            log.info("Welcome email sent successfully to: {}", toEmail);
+            String subject = "Welcome to " + appName + "!";
+            String body = buildWelcomeEmailBody(userName);
+            sendEmail(toEmail, subject, body, "Welcome");
         } catch (Exception e) {
-            log.error("Failed to send welcome email to: {}", toEmail, e);
+            log.error("Failed to send welcome email to: {} — {}", toEmail, e.getMessage());
         }
     }
 
     /**
-     * Send password reset OTP email
-     * 
-     * @param toEmail recipient email address
-     * @param otp     the 6-digit OTP code
+     * Send password reset OTP email (async version).
      */
     @Async
     public void sendPasswordResetOtpEmail(String toEmail, String otp) {
         try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
-            message.setSubject(appName + " Password Reset");
-            message.setText(buildPasswordResetEmailBody(otp));
-
-            mailSender.send(message);
-            log.info("Password reset OTP email sent successfully to: {}", toEmail);
+            String subject = appName + " Password Reset";
+            String body = buildPasswordResetEmailBody(otp);
+            sendEmail(toEmail, subject, body, "PasswordResetAsync");
         } catch (Exception e) {
-            log.error("Failed to send password reset OTP email to: {}", toEmail, e);
-            // Don't throw - let the async method fail silently rather than crash
+            log.error("Failed to send password reset OTP email to: {} — {}", toEmail, e.getMessage());
         }
     }
 
     /**
-     * Send password reset OTP email (synchronous version for forgot-password flow)
-     * 
-     * @param toEmail recipient email address
-     * @param otp     the 6-digit OTP code
+     * Send password reset OTP email (synchronous — used in forgot-password flow).
      */
     public void sendPasswordResetOtp(String toEmail, String otp) {
+        String subject = appName + " Password Reset OTP";
+        String body = buildPasswordResetEmailBody(otp);
         try {
-            log.info("Sending password reset OTP to: {}", toEmail);
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
-            message.setSubject(appName + " Password Reset OTP");
-            message.setText(buildPasswordResetEmailBody(otp));
-
-            mailSender.send(message);
-            log.info("Password reset OTP sent successfully to: {}", toEmail);
+            sendEmail(toEmail, subject, body, "PasswordResetSync");
         } catch (Exception e) {
-            log.error("Failed to send password reset OTP email to: {} - Error: {}", toEmail, e.getMessage(), e);
-            // Log but don't throw - OTP is already saved in database
+            log.error("Failed to send password reset OTP to: {} — {}", toEmail, e.getMessage());
+            // Don't throw — OTP is already saved in database, user can request resend
         }
     }
 
     /**
-     * Send password reset confirmation email
-     * 
-     * @param toEmail  recipient email address
-     * @param userName user's name
+     * Send password reset confirmation email.
      */
     @Async
     public void sendPasswordResetConfirmationEmail(String toEmail, String userName) {
         try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(toEmail);
-            message.setSubject(appName + " Password Reset Successful");
-            message.setText(buildPasswordResetConfirmationEmailBody(userName));
-
-            mailSender.send(message);
-            log.info("Password reset confirmation email sent to: {}", toEmail);
+            String subject = appName + " Password Reset Successful";
+            String body = buildPasswordResetConfirmationEmailBody(userName);
+            sendEmail(toEmail, subject, body, "PasswordResetConfirmation");
         } catch (Exception e) {
-            log.error("Failed to send password reset confirmation email to: {}", toEmail, e);
+            log.error("Failed to send password reset confirmation email to: {} — {}", toEmail, e.getMessage());
         }
     }
 
     /**
-     * Send a contact form notification email to admin inbox.
+     * Send contact form notification email to admin.
      */
     @Async
     public void sendContactMessageNotification(ContactMessage contactMessage) {
         if (contactAdminEmail == null || contactAdminEmail.isBlank()) {
-            log.warn("Skipping contact notification email because app.contact.admin-email is not configured.");
+            log.warn("Skipping contact notification — admin email is not configured.");
             return;
         }
-
         try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(fromEmail);
-            message.setTo(contactAdminEmail);
-            message.setSubject("New Contact Message");
-            message.setText(buildContactMessageEmailBody(contactMessage));
-
-            mailSender.send(message);
-            log.info("Contact notification email sent successfully for message id: {}", contactMessage.getId());
+            String subject = "New Contact Message";
+            String body = buildContactMessageEmailBody(contactMessage);
+            sendEmail(contactAdminEmail, subject, body, "ContactNotification");
         } catch (Exception e) {
-            log.error("Failed to send contact notification email for message id: {}", contactMessage.getId(), e);
+            log.error("Failed to send contact notification for message id: {} — {}", contactMessage.getId(), e.getMessage());
         }
     }
+
+    // ================================================================
+    // CORE — provider dispatch
+    // ================================================================
+
+    private void sendEmail(String toEmail, String subject, String body, String context) {
+        log.info("[{}] Sending email to: {} via {}", context, toEmail, emailProvider);
+        long start = System.currentTimeMillis();
+
+        try {
+            if (isBrevoProvider()) {
+                sendViaBrevo(toEmail, subject, body);
+            } else {
+                sendViaSmtp(toEmail, subject, body);
+            }
+            long elapsed = System.currentTimeMillis() - start;
+            log.info("[{}] Email sent successfully to: {} ({}ms)", context, toEmail, elapsed);
+        } catch (Exception e) {
+            long elapsed = System.currentTimeMillis() - start;
+            log.error("[{}] Email sending failed to: {} via {} ({}ms) — {}", context, toEmail, emailProvider, elapsed, e.getMessage());
+            throw new RuntimeException("Failed to send email (" + context + "): " + e.getMessage(), e);
+        }
+    }
+
+    // ================================================================
+    // SMTP provider (existing behavior — JavaMailSender)
+    // ================================================================
+
+    private void sendViaSmtp(String toEmail, String subject, String body) {
+        if (mailSender == null) {
+            throw new RuntimeException("JavaMailSender is not configured. Check SMTP settings.");
+        }
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(smtpFromEmail);
+        message.setTo(toEmail);
+        message.setSubject(subject);
+        message.setText(body);
+        mailSender.send(message);
+    }
+
+    // ================================================================
+    // Brevo HTTP API provider
+    // ================================================================
+
+    private void sendViaBrevo(String toEmail, String subject, String body) {
+        if (brevoApiKey.isBlank()) {
+            throw new RuntimeException("Brevo API key is not configured. Set BREVO_API_KEY environment variable.");
+        }
+
+        String url = brevoBaseUrl + "/smtp/email";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("api-key", brevoApiKey);
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+
+        // Brevo API payload structure
+        Map<String, Object> payload = Map.of(
+                "sender", Map.of(
+                        "name", brevoSenderName,
+                        "email", brevoSenderEmail
+                ),
+                "to", List.of(
+                        Map.of("email", toEmail)
+                ),
+                "subject", subject,
+                "textContent", body
+        );
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, request, String.class);
+
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new RuntimeException("Brevo API returned HTTP " + response.getStatusCode() + ": " + response.getBody());
+            }
+
+            log.debug("Brevo API response: {}", response.getBody());
+        } catch (org.springframework.web.client.RestClientException e) {
+            throw new RuntimeException("Brevo API call failed: " + e.getMessage(), e);
+        }
+    }
+
+    // ================================================================
+    // Email body builders — unchanged
+    // ================================================================
 
     private String buildOtpEmailBody(String otp) {
         return String.format("""

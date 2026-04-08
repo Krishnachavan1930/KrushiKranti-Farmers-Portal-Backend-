@@ -23,6 +23,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.config.Customizer;
 
+import org.springframework.beans.factory.annotation.Value;
 import java.nio.charset.StandardCharsets;
 
 @Configuration
@@ -34,6 +35,9 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final UserDetailsServiceImpl userDetailsService;
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+
+    @Value("${app.oauth2.frontend-success-url:http://localhost:5173}")
+    private String frontendUrl;
 
     private static final String[] PUBLIC_URLS = {
             "/api/v1/auth/**",
@@ -114,10 +118,12 @@ public class SecurityConfig {
                         }))
                 .oauth2Login(oauth2 -> oauth2
                         .successHandler(oAuth2LoginSuccessHandler)
-                        .failureHandler((request, response,
-                                exception) -> response.sendRedirect("http://localhost:5173/?oauth2=error&message="
-                                        + java.net.URLEncoder.encode("Google login failed",
-                                                java.nio.charset.StandardCharsets.UTF_8))))
+                        .failureHandler((request, response, exception) -> {
+                            String redirectUrl = frontendUrl + "/?oauth2=error&message="
+                                    + java.net.URLEncoder.encode("Google login failed",
+                                            java.nio.charset.StandardCharsets.UTF_8);
+                            response.sendRedirect(redirectUrl);
+                        }))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
